@@ -1,0 +1,122 @@
+---
+title: "Childcare Tidy Tuesday"
+author: "Chloe Mintlow"
+date: "2023-05-13"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning= FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Load Libraries**
+```{r}
+library(tidytuesdayR)
+library(tidyverse)
+library(here)
+library(withr)
+library(tibble)
+library(ggrepel)
+library(PNWColors)
+```
+
+## **Data Load**
+```{r}
+tuesdata <- tidytuesdayR::tt_load('2023-05-09')
+tuesdata <- tidytuesdayR::tt_load(2023, week = 19)
+childcare_costs <- tuesdata$childcare_costs
+counties <- tuesdata$counties #did not use in my plot/code
+
+# Or read in the data manually
+
+childcare_costs <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-05-09/childcare_costs.csv')
+
+glimpse(childcare_costs)
+
+```
+## **Code**
+```{r}
+url <- "https://www.dol.gov/sites/dolgov/files/WB/media/nationaldatabaseofchildcareprices.xlsx"
+temp_xlsx <- withr::local_tempfile(fileext = ".xlsx")
+download.file(url, temp_xlsx, mode = "wb")
+
+childcare_costs_raw <- readxl::read_xlsx(temp_xlsx) |>
+  janitor::clean_names() |> 
+  # There are 15 constant columns. Get rid of those.
+  janitor::remove_constant(quiet = FALSE)
+
+# The file is very large, but it contains a lot of duplicate data. Extract
+# duplications into their own tables.
+counties <- childcare_costs_raw |> 
+  dplyr::distinct(county_fips_code, county_name, state_name, state_abbreviation)
+childcare_costs <- childcare_costs_raw |> 
+  dplyr::select(
+    -county_name,
+    -state_name,
+    -state_abbreviation,
+    # Original data also contained unadjusted + adjusted dollars, let's just
+    # keep the 2018 adjustments.
+    -mhi, -me, -fme, -mme,
+    # A number of columns have fine-grained breakdowns by age, and then also
+    # broader categories. Let's only keep the categories ("infant" vs 0-5
+    # months, 6-11 monts, etc)
+    -ends_with("bto5"), -ends_with("6to11"), -ends_with("12to17"), 
+    -ends_with("18to23"), -ends_with("24to29"), -ends_with("30to35"),
+    -ends_with("36to41"), -ends_with("42to47"), -ends_with("48to53"),
+    -ends_with("54to_sa"),
+    # Since we aren't worrying about the unaggregated columns, we can ignore the
+    # flags indicating how those columns were aggregated into the combined
+    # columns.
+    -ends_with("_flag"),
+    # Original data has both median and 75th percentile for a number of columns.
+    # We'll simplify.
+    -starts_with("x75"),
+    # While important for wider research, we don't need to keep the (many)
+    # variables describing whether certain data was imputed.
+    -starts_with("i_")
+  )
+
+glimpse(childcare_costs_raw) #view raw data
+
+readr::write_csv(
+  childcare_costs,
+  here::here(
+    "Childcare_Tidy",
+    "data",
+    "childcare_costs.csv" #save data in folder
+  )
+)
+
+```
+
+## **Make a Childcare Plot**
+```{r, childcareplot, na.rm=FALSE }
+filterchildcare<- childcare_costs %>%
+  filter(study_year==2018) %>% #reduce to year 2018
+  filter(county_fips_code > 1000, county_fips_code < 1025) #specify county code
+
+glimpse(filterchildcare) #view filtered data
+
+readr::write_csv(
+  filterchildcare,
+  here::here(
+    "Childcare_Tidy",
+    "data",
+    "filteredchildcare_costs.csv"
+  )
+)
+
+filterchildcare %>% 
+  ggplot(aes(x = h_6to17_single_m, color = study_year, label = rownames(filterchildcare))) + 
+  geom_histogram()+
+  labs(x = "Number of Single Mothers with Kids Over Age 6", 
+       color = "Study Year")+
+  ggtitle("2018 Childcare Costs of Single Mothers")+ 
+  theme(plot.title = element_text(size = 12, hjust = 0.5), #resize font
+         panel.background = element_rect(fill = "lightblue"))
+
+ggsave(here("Childcare_Tidy", "output", "childcareplot.png"))
+         
+```
+
+### Tidy Tuesday data came from the [National Database of Childcare Prices](https://www.dol.gov/agencies/wb/topics/featured-childcare).
